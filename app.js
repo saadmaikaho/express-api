@@ -65,7 +65,7 @@ app.get('/tickets', async (req, res) => {
 });
 
 // Generate ticket
-app.post('/generateTicket', async (req, res) => {
+app.post('/generate_ticket/', async (req, res) => {
   try {
     // Implementation to generate ticket code
     const ticket = await LotteryTicket.create({ ticketCode: ticket_code });

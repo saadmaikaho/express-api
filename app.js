@@ -1,111 +1,122 @@
 const express = require('express');
-const { createConnection } = require('typeorm');
-const { LotteryTicket } = require('./models');
+const bodyParser = require('body-parser');
+const csv = require('csv-parser');
+const fs = require('fs');
+const { LotteryTicket } = require('./models'); // Import your LotteryTicket model
 
 const app = express();
-const PORT = process.env.PORT || 8000;
+const port = 8000;
 
-app.use(express.json());
+app.use(bodyParser.json());
 
-// Enable CORS
+// CORS setup
 app.use((req, res, next) => {
-  res.header('Access-Control-Allow-Origin', '*'); // Update the allowed origin
-  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE');
-  res.header('Access-Control-Allow-Headers', '*');
-  res.header('Access-Control-Allow-Credentials', true);
-  next();
+    res.header('Access-Control-Allow-Origin', 'https://tkcompany.vercel.app');
+    res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept');
+    next();
 });
 
-
-// Database connection
-createConnection({
-  type: 'sqlite',
-  database: 'data/db.sqlite3',
-  synchronize: true,
-  entities: [LotteryTicket],
-}).then(() => {
-  console.log('Database connected');
-}).catch(error => console.log('Error connecting to database:', error));
-
-// Check if phone number exists
+// Function to check if phone number exists in CSV
 async function phoneNumberExists(phoneNumber) {
-  // Implementation to check phone number existence in data.csv
+    return new Promise((resolve, reject) => {
+        const results = [];
+        fs.createReadStream('data.csv')
+            .pipe(csv())
+            .on('data', (data) => results.push(data))
+            .on('end', () => {
+                const exists = results.some((row) => row.phoneNumber === phoneNumber);
+                resolve(exists);
+            })
+            .on('error', (error) => {
+                reject(error);
+            });
+    });
 }
 
-// Save phone number
+// Endpoint to save phone number
 app.post('/savePhoneNumber', async (req, res) => {
-  const { phoneNumber } = req.body;
-  if (!phoneNumber) {
-    return res.status(400).json({ detail: 'Phone number is required' });
-  }
+    const phoneNumber = req.body.phoneNumber;
+    if (!phoneNumber) {
+        return res.status(400).json({ detail: 'Phone number is required' });
+    }
 
-  const exists = await phoneNumberExists(phoneNumber);
-  if (exists) {
-    return res.status(400).json({ detail: 'Phone number already exists' });
-  }
+    try {
+        const exists = await phoneNumberExists(phoneNumber);
+        if (exists) {
+            return res.status(400).json({ detail: 'Phone number already exists' });
+        }
 
-  try {
-    // Implementation to save phone number to data.csv
-  } catch (error) {
-    console.log('Error saving phone number:', error);
-    return res.status(500).json({ detail: 'Failed to save phone number' });
-  }
-
-  return res.json({ message: 'Phone number saved successfully' });
+        fs.appendFileSync('data.csv', `${phoneNumber}\n`);
+        return res.json({ message: 'Phone number saved successfully' });
+    } catch (error) {
+        console.error(`Error saving phone number: ${error}`);
+        return res.status(500).json({ detail: 'Failed to save phone number' });
+    }
 });
 
-// Get tickets
-app.get('/tickets', async (req, res) => {
-  try {
-    const tickets = await LotteryTicket.find();
-    return res.json(tickets);
-  } catch (error) {
-    return res.status(500).json({ detail: 'Internal server error' });
-  }
-});
-
-// Generate ticket
+// Endpoint to generate ticket
 app.post('/generate_ticket', async (req, res) => {
-  try {
-    // Implementation to generate ticket code
-    const ticket = await LotteryTicket.create({ ticketCode: ticket_code });
-    await ticket.save();
-    return res.json({ ticketCode: ticket.ticketCode });
-  } catch (error) {
-    return res.status(500).json({ detail: 'Internal server error' });
-  }
+    const ticketCode = Array(10)
+        .fill()
+        .map(() => Math.random().toString(36).charAt(2))
+        .join('');
+    try {
+        const ticket = await LotteryTicket.create({ ticket_code: ticketCode });
+        return res.json({ ticket_code: ticket.ticket_code });
+    } catch (error) {
+        console.error(`Error generating ticket: ${error}`);
+        return res.status(500).json({ detail: 'Failed to generate ticket' });
+    }
 });
 
-// Submit ticket
-app.post('/submitTicket/:ticket_code', async (req, res) => {
-  const { ticket_code } = req.params;
-  try {
-    // Implementation to submit ticket
-  } catch (error) {
-    return res.status(500).json({ detail: 'Internal server error' });
-  }
+// Endpoint to submit ticket
+app.post('/submit_ticket/:ticket_code', async (req, res) => {
+    const ticketCode = req.params.ticket_code;
+    const ticket = await LotteryTicket.findOne({ ticket_code: ticketCode });
+    if (!ticket) {
+        return res.status(400).json({ detail: 'Invalid ticket code' });
+    }
+    if (ticket.used) {
+        return res.status(400).json({ detail: 'Ticket already used' });
+    }
+    // Process the submission as needed
 });
 
-// Spin
+// Endpoint to spin
 app.get('/spin/:ticket_code', async (req, res) => {
-  const { ticket_code } = req.params;
-  try {
-    // Implementation to spin
-  } catch (error) {
-    return res.status(500).json({ detail: 'Internal server error' });
-  }
+    const ticketCode = req.params.ticket_code;
+    const ticket = await LotteryTicket.findOne({ ticket_code: ticketCode });
+    if (!ticket) {
+        return res.status(400).json({ detail: 'Invalid ticket code' });
+    }
+    if (ticket.used) {
+        return res.status(400).json({ detail: 'Ticket already used' });
+    }
+    const result = get_random_result();
+    ticket.result = result;
+    ticket.used = true;
+    await ticket.save();
+    return res.json({ prize: result });
 });
 
-// Get ticket prize
-app.get('/ticketPrize/:ticket_code', async (req, res) => {
-  const { ticket_code } = req.params;
-  try {
-    // Implementation to get ticket prize
-  } catch (error) {
-    return res.status(500).json({ detail: 'Internal server error' });
-  }
+// Endpoint to get ticket prize
+app.get('/ticket_prize/:ticket_code', async (req, res) => {
+    const ticketCode = req.params.ticket_code;
+    const ticket = await LotteryTicket.findOne({ ticket_code: ticketCode });
+    if (!ticket) {
+        return res.status(404).json({ detail: 'Ticket not found' });
+    }
+    if (!ticket.used) {
+        return res.json({ message: 'Ticket code has not been used yet' });
+    }
+    return res.json({ ticket_code: ticketCode, prize: ticket.result });
 });
 
-app.listen(PORT, () => {
-  console.log(`Server is running on port ${PORT}`);
+function get_random_result() {
+    const prizes = ['谢谢参与', '300', '600', '900', '1500', '3000', '8800', '再来一次'];
+    return prizes[Math.floor(Math.random() * prizes.length)];
+}
+
+app.listen(port, () => {
+    console.log(`Server is listening at http://localhost:${port}`);
 });
